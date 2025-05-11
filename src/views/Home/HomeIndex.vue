@@ -7,16 +7,10 @@
         <!-- 轨迹预处理模块 -->
         <el-menu class="el-menu-vertical-demo" :router="true">
           <!-- 轨迹预处理模块 -->
-          <el-sub-menu index="3">
-            <template #title>
-              <el-icon><User /></el-icon>
-              <span>轨迹预处理</span>
-            </template>
-            <el-menu-item index="product_manage">噪声过滤</el-menu-item>
-            <el-menu-item index="users_manage">轨迹压缩</el-menu-item>
-            <el-menu-item index="massage_manage">轨迹聚类</el-menu-item>
-            <el-menu-item index="massage_manage">轨迹分段</el-menu-item>
-          </el-sub-menu>
+          <el-menu-item index="Preprocessing">
+            <el-icon><location /></el-icon>
+            <span>轨迹预处理模块</span>
+          </el-menu-item>
           <!-- 轨迹可视化模块 -->
           <el-sub-menu index="4">
             <template #title>
@@ -42,7 +36,7 @@
           <el-sub-menu index="6">
             <template #title>
               <el-icon><ChatSquare /></el-icon>
-              <span>语义增强模块</span>
+              <span>数据存储管理</span>
             </template>
             <el-menu-item index="product_manage">停留点识别</el-menu-item>
             <el-menu-item index="product_manage">地图匹配</el-menu-item>
@@ -50,14 +44,36 @@
         </el-menu>
       </el-aside>
       <el-container>
-        <el-header>
+        <router-view v-if="$route.name !== 'Home'"></router-view>
+        <el-header v-show="$route.name == 'Home'">
           <div class="header-right-conten">
-            <el-button>输入数据</el-button>
-            <el-button>保存数据</el-button>
-            <el-button>备用按钮1</el-button>
-            <el-button>备用按钮2</el-button>
+            <el-button @click="zoomIn">单击缩小</el-button>
+            <el-button @click="zoomOut">单击放大</el-button>
+            <el-button @click="panToWuhan">平移到武汉</el-button>
+            <el-button @click="reset">复位</el-button>
+            <!-- 新增绘图控制按钮组 -->
+            <el-dropdown @command="handleDraw">
+              <el-button>
+                绘制图形
+                <el-icon><arrow-down /></el-icon>
+              </el-button>
+              <template v-slot:dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="Point">绘制点</el-dropdown-item>
+                    <el-dropdown-item command="LineString">绘制线</el-dropdown-item>
+                    <el-dropdown-item command="Polygon">绘制面</el-dropdown-item>
+                  </el-dropdown-menu>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-button @click="clearFeatures">清除绘制</el-button>
+            <!-- <el-button @click="toggleBoxSelection">
+              {{ isBoxSelecting ? '结束框选' : '开始框选' }}
+            </el-button> -->
           </div>
         </el-header>
+
         <!-- 地图容器 -->
         <div id="map" ref="mapContainer"></div>
       </el-container>
@@ -75,18 +91,29 @@ import { Map, View } from 'ol'
 import TileLayer from 'ol/layer/Tile'
 import XYZ from 'ol/source/XYZ'
 import { fromLonLat } from 'ol/proj'
-
+import Draw from 'ol/interaction/Draw'
+import VectorSource from 'ol/source/Vector'
+import VectorLayer from 'ol/layer/Vector'
+/* import DragBox from 'ol/interaction/DragBox' */
+import { Style, Fill, Stroke, Circle } from 'ol/style'
 export default {
   name: 'JustaMap',
   //定义了一个名为map的数据属性，用于存储地图实例。
   data() {
     return {
       map: null,
+      draw: null,
+      vectorSource: null,
+      vectorLayer: null,
+      dragBox: null,
+      isBoxSelecting: false,
+      selectedFeatures: [],
     }
   },
   //组件生命周期钩子 (mounted()):当组件挂载到DOM后，调用initMap方法来初始化地图。
   mounted() {
     this.initMap()
+    this.initVectorLayer()
   },
 
   methods: {
@@ -118,6 +145,125 @@ export default {
       })
       map.addLayer(gaodeLayer)
     },
+    //缩小
+    zoomIn() {
+      const view = this.map.getView()
+      const zoom = view.getZoom()
+      view.setZoom(zoom - 1)
+    },
+    //放大
+    zoomOut() {
+      const view = this.map.getView()
+      const zoom = view.getZoom()
+      view.setZoom(zoom + 1)
+    },
+    //平移到武汉
+    panToWuhan() {
+      const view = this.map.getView() //获取视图
+      view.animate({
+        center: fromLonLat([114.305392, 30.593098]),
+        duration: 2000,
+      })
+    },
+    //复位功能（复位到初始状态）
+    reset() {
+      const view = this.map.getView()
+      view.setCenter(fromLonLat([116.407428, 39.904198]))
+      view.setZoom(10)
+    },
+    initVectorLayer() {
+      this.vectorSource = new VectorSource()
+      this.vectorLayer = new VectorLayer({
+        source: this.vectorSource,
+        style: (feature) => {
+          const geometryType = feature.getGeometry().getType()
+          if (geometryType === 'Point') {
+            return new Style({
+              image: new Circle({
+                radius: 6,
+                fill: new Fill({
+                  color: '#ff0000',
+                }),
+                stroke: new Stroke({
+                  color: '#ffffff',
+                  width: 2,
+                }),
+              }),
+            })
+          } else {
+            return new Style({
+              fill: new Fill({
+                color: 'rgba(255, 255, 255, 0.2)',
+              }),
+              stroke: new Stroke({
+                color: '#ffcc33',
+                width: 2,
+              }),
+            })
+          }
+        },
+      })
+      this.map.addLayer(this.vectorLayer)
+    },
+    // 添加清除绘制要素的方法
+    clearFeatures() {
+      if (this.vectorSource) {
+        this.vectorSource.clear() // 清除所有要素
+      }
+    },
+    handleDraw(type) {
+      // 如果已经存在绘图交互，先移除
+      if (this.draw) {
+        this.map.removeInteraction(this.draw)
+      }
+
+      // 创建新的绘图交互
+      this.draw = new Draw({
+        source: this.vectorSource,
+        type: type,
+      })
+
+      this.map.addInteraction(this.draw)
+    },
+
+    /* toggleBoxSelection() {
+      if (this.isBoxSelecting) {
+        if (this.dragBox) {
+          this.map.removeInteraction(this.dragBox)
+          this.dragBox = null
+        }
+      } else {
+        this.dragBox = new DragBox({
+          style: new Style({
+            stroke: new Stroke({
+              color: '#0099ff',
+              width: 2,
+            }),
+            fill: new Fill({
+              color: 'rgba(0, 153, 255, 0.2)',
+            }),
+          }),
+        })
+
+        // 添加框选事件监听
+        this.dragBox.on('boxend', () => {
+          const extent = this.dragBox.getGeometry().getExtent()
+          console.log('选择区域范围:', extent)
+
+          // 获取选中区域内的要素
+          const selectedFeatures = this.vectorSource.getFeaturesInExtent(extent)
+          console.log('选中的要素数量:', selectedFeatures.length)
+
+          // 这里可以对选中的要素进行处理
+          selectedFeatures.forEach((feature) => {
+            console.log('选中要素类型:', feature.getGeometry().getType())
+          })
+        })
+
+        this.map.addInteraction(this.dragBox)
+      }
+      this.isBoxSelecting = !this.isBoxSelecting
+    }, */
   },
 }
 </script>
@@ -189,5 +335,13 @@ export default {
     justify-content: space-around;
     align-items: center;
   }
+}
+.header-right-conten {
+  width: auto; // 修改宽度以适应更多按钮
+  gap: 10px; // 添加按钮间距
+}
+
+.el-dropdown {
+  margin-left: 10px;
 }
 </style>

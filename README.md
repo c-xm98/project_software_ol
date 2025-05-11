@@ -33,3 +33,9 @@ npm run build
 ```sh
 npm run lint
 ```
+
+# git管理
+
+    git init
+    git add .
+    git commit -m "init"
